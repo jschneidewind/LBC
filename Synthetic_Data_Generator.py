@@ -18,7 +18,7 @@ def synthetic_data(lower_l, upper_l, no_dp, c0, k, a, sigma):
 	''' Generates synthetic data with polynomial (order determined by length of parameter vector a), over range defiend by lower_l and upper_l, 
 	with variable number of datapoints (no_dp), variable signal characteristics (c0, k) and different levels of noise (sigma),
 	returns 2d array with synthetic data
-	Use e.g. lower_l = -2, upper_l = 4, no_dp = 100, c0 = 1., k = 4., a = [0.04, 0.2, -0.07], sigma = 0.02'''
+	Use e.g. lower_l = -2, upper_l = 4, no_dp = 100, c0 = 1., k = 4., a = [0.4, 0.05, -0.007], sigma = 0.02'''
 
 	x_complete = np.linspace(lower_l, upper_l, no_dp)
 	idx = fn.find_nearest(x_complete, 0)[0]
