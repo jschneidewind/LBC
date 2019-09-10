@@ -1,3 +1,4 @@
 import numpy as np
 
-# test file
+x = np.arange(0, 10, 0.1)
+print(x)
