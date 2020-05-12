@@ -93,8 +93,8 @@ def elevator_function_fitting(data, start, end, order_poly):
 	y = np.r_[data[:,1][:idx[0]], data[:,1][idx[1]:]]
 
 	m = (data[:,0][idx[0]] + data[:,0][idx[1]]) / 2
-	x_mid = (data[:,0][idx[1]] - m) / 2
-	spn = np.log(1.0/999999.0) / x_mid
+	x_75 = (data[:,0][idx[1]] - m) / 2
+	spn = np.log(1.0/999999.0) / x_75
 
 	p_guess = np.ones(order_poly+2)*0.01
 
