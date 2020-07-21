@@ -29,6 +29,14 @@ def first_order(c0, k, t):
 
 	return 1 - (c0 * np.exp(-k*t))
 
+def first_order_combined(p, t, only_k):
+	'''First order function with option to fix p[0] ([A0]) to be 1'''
+
+	if only_k == True:
+		p[0] = 1.
+
+	return p[0] - (p[0] * np.exp(-p[1]*t))
+
 def poly(a, x):
 
 	y = a[0] * x**0
@@ -78,9 +86,9 @@ def residual_pre_signal(p, x, y):
 
 	return res
 
-def residual_first_order(p, x, y):
+def residual_first_order(p, x, y, only_k):
 
-	y_fit = first_order(1., p[0], x)
+	y_fit = first_order_combined(p, x, only_k)
 	res = y - y_fit
 
 	return res
@@ -108,6 +116,7 @@ def elevator_function_fitting(data, start, end, order_poly):
 	return np.c_[data[:,0], y_corrected], p_solved[-1], p_solved[:-1]
 
 def pre_signal_fitting(data, end, order_poly):
+	'''Pre-feature fitting function'''
 
 	idx = find_nearest(data, end)
 	x = data[:,0][:idx[0]]
@@ -122,20 +131,62 @@ def pre_signal_fitting(data, end, order_poly):
 
 	return np.c_[data[:,0], y_corrected]
 
-def first_order_fitting(data):
+def first_order_fitting(data, return_full = False, only_k = True):
+	'''First order fitting by fitting first_order_combined function. only_k flag controls if only k or both [A0] and
+	k are fitted'''
 
 	idx = find_nearest(data, 0)[0]
 
 	x = data[:,0][idx:]
 	y = data[:,1][idx:]
 
-	p_guess = np.ones(1)
-	p = least_squares(fun=residual_first_order, x0=p_guess, args=(x, y))
-	p_solved = np.array([1., p.x])
+	p_guess = np.ones(2)
+	p = least_squares(fun=residual_first_order, x0=p_guess, args=(x, y, only_k))
 
-	y_fit = first_order(p_solved[0], p_solved[1], x)
+	y_fit = first_order_combined(p.x, x, only_k)
 
-	return p.x
+	if return_full == False:
+		return p.x[1]
+
+	else:
+		return p.x
+
+def baseline_signal_function(p, x, only_k):
+	'''Combined baseline and feature function using sum of polynomial and first_order_combined'''
+
+	idx = find_nearest(x, 0)[0]
+
+	x_baseline = x[:idx]
+	x_signal = x[idx:]
+
+	baseline = poly(p[:-2], x_baseline)
+	signal = poly(p[:-2], x_signal) + first_order_combined(p[-2:], x_signal, only_k)
+
+	return np.r_[baseline, signal]
+
+def residual_combined(p, x, y, only_k):
+
+	y_fit = baseline_signal_function(p, x, only_k)
+	res = y - y_fit
+
+	return res
+
+def combined_baseline_signal_fitting(data, order_poly, return_full = False, only_k = True):
+	'''Combined fitting of baseline and feature by using sum of polynomial and first_order_combined, only_k flag controls
+	if only k is optimized or [A0] and k'''
+
+	x = data[:,0]
+	y = data[:,1]
+
+	p_guess = np.ones(order_poly+3)
+	p = least_squares(fun=residual_combined, x0=p_guess, args=(x, y, only_k))
+	p_solved = p.x
+
+	if return_full == False:
+		return p_solved[-1]
+
+	else:
+		return p_solved[-2:]
 
 def variable_first_order_fitting(samples, no_dp, sigma, lower_l = -2., upper_l = 4., c0 = 1., k = 4., a = [0.4, 0.05, -0.007], start = -0.005, end = 2., order_poly = 2):
 	'''Performs fitting of first order, integrated rate law to baseline corrected data obtained using different baseline
@@ -227,11 +278,13 @@ def variable_performance_test(samples, order_poly, noise_level, no_dp, plotting 
 
 def first_order_fitting_performance(samples, lower_l = -2., upper_l = 4., no_dp = 1000, c0 = 1., k = 4., a = [0.4, 0.05, -0.007], sigma = 0.02, start = -0.005, end = 2., order_poly = 2, plotting = True):
 	'''Function evaluates accuracy of k obtained by fitting first order, integrated rate law to baseline corrected data obtained
-	using different baseline correction methods. Function was used to generate Figure 2 (manuscript)'''
+	using different baseline correction methods. Function was used to generate Figure 2 (manuscript)
+	Fitting is performed either fixing [A0] to be one (only_k = True, default) or fitting both [A0] and k (only_k = False)'''
 
-	k_elevator = []
-	k_pre_signal = []
-	k_pure_signal = []
+	arr_elevator = []
+	arr_pre_signal = []
+	arr_pure_signal = []
+	arr_combined = []
 
 	for i in range(samples):
 
@@ -240,32 +293,75 @@ def first_order_fitting_performance(samples, lower_l = -2., upper_l = 4., no_dp 
 		elevator_data, c, p = elevator_function_fitting(data, start, end, order_poly)
 		pre_signal_data = pre_signal_fitting(data, start, order_poly)
 
-		p_elevator = first_order_fitting(elevator_data)
-		p_pre_signal = first_order_fitting(pre_signal_data)
-		p_pure_signal = first_order_fitting(pure_signal)
+		k_elevator = first_order_fitting(elevator_data)
+		k_pre_signal = first_order_fitting(pre_signal_data)
+		k_pure_signal = first_order_fitting(pure_signal)
+		k_combined = combined_baseline_signal_fitting(data, 2)
 
-		k_elevator.append(p_elevator)
-		k_pre_signal.append(p_pre_signal)
-		k_pure_signal.append(p_pure_signal)
+		ak_elevator = first_order_fitting(elevator_data, return_full = False, only_k = False)
+		ak_pre_signal = first_order_fitting(pre_signal_data, return_full = False, only_k = False)
+		ak_pure_signal = first_order_fitting(pure_signal, return_full = False, only_k = False)
+		ak_combined = combined_baseline_signal_fitting(data, 2, return_full = False, only_k = False)
 
-	arr_elevator = np.asarray(k_elevator)
-	arr_pre_signal = np.asarray(k_pre_signal)
-	arr_pure_signal = np.asarray(k_pure_signal)
+		arr_elevator.append([k_elevator, ak_elevator])
+		arr_pre_signal.append([k_pre_signal, ak_pre_signal])
+		arr_pure_signal.append([k_pure_signal, ak_pure_signal])
+		arr_combined.append([k_combined, ak_combined])
 
-	result = np.c_[arr_elevator, arr_pre_signal, arr_pure_signal]
+	arr_elevator = np.asarray(arr_elevator)
+	arr_pre_signal = np.asarray(arr_pre_signal)
+	arr_pure_signal = np.asarray(arr_pure_signal)
+	arr_combined = np.asarray(arr_combined)
+
+	result = np.dstack((arr_elevator, arr_pre_signal, arr_pure_signal, arr_combined))
 
 	if plotting == True:
-		plt.figure()
-		plt.hist(arr_pure_signal, alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'green', linewidth = 1., edgecolor = 'black')
-		plt.hist(arr_pre_signal, alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'orange', linewidth = 1., edgecolor = 'black')
-		plt.hist(arr_elevator, alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'blue', linewidth = 1., edgecolor = 'black')
 
-		print('mean elevator:', np.mean(arr_elevator))
-		print('mean pre signal:', np.mean(arr_pre_signal))
-		print('mean pure signal:', np.mean(arr_pure_signal))
-		print('std elevator:', np.std(arr_elevator))
-		print('std pre signal:', np.std(arr_pre_signal))
-		print('std pure signal:', np.std(arr_pure_signal))
+		fig, ax = plt.subplots(2) #, figsize = (10, 7))
+
+		ax[0].hist(arr_pure_signal[:,0], alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'green', linewidth = 1., edgecolor = 'black', label = 'Control')
+		ax[0].hist(arr_pre_signal[:,0], alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'orange', linewidth = 1., edgecolor = 'black', label = 'Pre-Feature Fitting')
+		ax[0].hist(arr_elevator[:,0], alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'blue', linewidth = 1., edgecolor = 'black', label = 'LBC')
+		ax[0].hist(arr_combined[:,0], alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'red', linewidth = 1., edgecolor = 'black', label = 'Combined Fitting')
+		ax[0].title.set_text('Fitting only k')
+		ax[0].set_xlabel('$ k $ / a.u.')
+		ax[0].set_ylabel('Frequency')
+		legend = ax[0].legend()
+
+		ax[1].hist(arr_pure_signal[:,1], alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'green', linewidth = 1., edgecolor = 'black', label = 'Control')
+		ax[1].hist(arr_pre_signal[:,1], alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'orange', linewidth = 1., edgecolor = 'black', label = 'Pre-Feature Fitting')
+		ax[1].hist(arr_elevator[:,1], alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'blue', linewidth = 1., edgecolor = 'black', label = 'LBC')
+		ax[1].hist(arr_combined[:,1], alpha = 0.7, bins = np.arange(k-1., k+1., 0.02), histtype =u'step', fill = 'red', linewidth = 1., edgecolor = 'black', label = 'Combined Fitting')
+		ax[1].title.set_text('Fitting [A0] and k')
+		ax[1].set_xlabel('$ k $ / a.u.')
+		ax[1].set_ylabel('Frequency')
+		legend = ax[1].legend()
+
+		fig.subplots_adjust(hspace = 0.45)
+
+		print('Only fitting k, mean and std:')
+
+		print('mean elevator:', np.mean(arr_elevator[:,0]))
+		print('mean pre signal:', np.mean(arr_pre_signal[:,0]))
+		print('mean pure signal:', np.mean(arr_pure_signal[:,0]))
+		print('mean combined:', np.mean(arr_combined[:,0]))
+
+		print('std elevator:', np.std(arr_elevator[:,0]))
+		print('std pre signal:', np.std(arr_pre_signal[:,0]))
+		print('std pure signal:', np.std(arr_pure_signal[:,0]))
+		print('std combined:', np.std(arr_combined[:,0]))
+
+		print('Fitting [A0] and k, mean and std:')
+
+		print('mean elevator:', np.mean(arr_elevator[:,1]))
+		print('mean pre signal:', np.mean(arr_pre_signal[:,1]))
+		print('mean pure signal:', np.mean(arr_pure_signal[:,1]))
+		print('mean combined:', np.mean(arr_combined[:,1]))
+
+		print('std elevator:', np.std(arr_elevator[:,1]))
+		print('std pre signal:', np.std(arr_pre_signal[:,1]))
+		print('std pure signal:', np.std(arr_pure_signal[:,1]))
+		print('std combined:', np.std(arr_combined[:,1]))
 
 	return result
 
@@ -324,8 +420,8 @@ def fitting_failure_performance(samples, no_dp, sigma, threshold = 1., plotting 
 def main():
 
 	variable_performance_test(samples = 10, order_poly = np.array([2]), noise_level = np.array([0.001, 0.01, 0.02, 0.03, 0.1]), no_dp = np.array([100]))
-	first_order_fitting_performance(20)
-	fitting_failure_performance(200, np.array([1000]), np.array([0.01, 0.05, 0.1, 0.2, 0.5]))
+	first_order_fitting_performance(200)
+	fitting_failure_performance(20, np.array([1000]), np.array([0.01, 0.05, 0.1, 0.2, 0.5]))
 	plt.show()
 
 if __name__ == '__main__':
