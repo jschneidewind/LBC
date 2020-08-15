@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.linalg import inv
 from scipy.optimize import least_squares
 import matplotlib.pyplot as plt
 
@@ -76,6 +77,17 @@ def residual_generic(p, x, y, function):
     res = y - y_fit
 
     return res
+
+def polynomial_regression(x, y, order):
+    '''Polynomial regression function, fitting polynomial of order 'order' to x and y using ordinary least squares''' 
+
+    X_raw = np.tile(x, (order+1, 1))
+    powers = np.arange(0, order+1)
+    X = np.power(X_raw.T, powers)
+
+    coef = np.dot(np.dot(inv(np.dot(X.T, X)), X.T), y)
+
+    return coef
 
 def elevator_function_fitting(data, start, end, order_poly, plotting = False, return_full = True, p_guess = None):
     '''LBC function'''
@@ -230,11 +242,49 @@ def combined_feature_fitting(p_guess, data, return_full = False, plotting = Fals
         baseline = poly(p.x[:-3], x)
 
         if plotting == True:
-            plt.plot(x, y)
+            plt.plot(x, y, '.')
             plt.plot(x, y_fit)
             plt.plot(x, baseline)
 
         return x, y, y_fit, baseline, p.x
+
+def alternating_combined_fitting(p_guess, data, order_poly, convergence_threshold = 1e-9, max_iter = 500, plotting = False):
+    '''Combined fitting of baseline and feature by alternating between baseline and feature fitting.
+    First, a polynomial is fitted to the feature subtracted data using ordinary least squares.
+    Then, the feature function is fitted to the baseline subtracted data using non linear least squares.
+    This process is iterated until the change in the residual sum of squares between the last two iteration is below the convergence threshold or
+    the number of iterations has reached the max_iter limit.'''
+
+    diff = 1.  # initialize difference between last two residual sum of squares
+    count = 0   # initialize iteration count
+
+    x = data[:,0]
+    y = data[:,1]
+
+    feature = np.zeros(len(x))
+    residuals = [diff]
+
+    while abs(diff) > convergence_threshold and count < max_iter:
+
+        p_poly = polynomial_regression(x, y - feature, order_poly)
+        baseline = poly(p_poly, x)
+
+        p_feature = least_squares(fun=residual_generic, x0=p_guess, args=(x, y - baseline, first_order_shift), method = 'lm')
+        feature = first_order_shift(p_feature.x, x)
+
+        residual = residual_generic(np.r_[p_poly, p_feature.x], x, y, baseline_feature_function)
+        residual = np.sum(residual**2)
+        residuals.append(residual)
+        
+        diff = residuals[-2] - residuals[-1]
+        count += 1
+
+    if plotting == True:
+        plt.plot(x, y, '.')
+        plt.plot(x, baseline)
+        plt.plot(x, feature + baseline)
+
+    return p_poly, p_feature
 
 def fitting_success(data, cut_off, samples):
     '''Evaluates if fitting attempts were successful by comparing them against the cut_off. Returns percentage of
@@ -354,20 +404,18 @@ def main():
     p_guess_combined = np.r_[p_ele_full, np.random.rand(1), 2073.] # generating initial guess for combined fitting by using polynomial parameters and feature magnitude obtained using LBC, adding a random value for k guess and addig 2073 as guess for feature start time
     #p_guess_combined = np.r_[np.random.rand(3), final_conc, np.random.rand(1), 2073.]
 
-    p_combined = combined_feature_fitting(p_guess_combined, data_short, return_full = True, plotting = True)
+    p_combined = combined_feature_fitting(p_guess_combined, data_short, return_full = True, plotting = False)
+    alternating_combined_fitting(np.array([1., 1., 2073.]), data_short, 10, plotting = True)
 
     print('Results using normalized data, stationary O2 concentration:', final_conc)
-
     print('LBC: k = ', p_ele[1])
     print('Pre-Feature Fitting: k = ', p_pre[1])
     print('Post-Feature Fitting: k = ', p_post[1])
 
     print('Results using non-normalized data:')
-
     print('LBC: [A0] =', p_ele_nn[0], 'k =', p_ele_nn[1])
     print('Pre-Feature Fitting: [A0] =', p_pre_nn[0], 'k =', p_pre_nn[1])
     print('Post-Feature Fitting: [A0] =', p_post_nn[0], 'k =', p_post_nn[1])
-
     print('Combined Fitting: [A0] =', p_combined[-1][-3], 'k =', p_combined[-1][-2])
 
     sigma = np.array([0.001, 0.01, 0.1, 1., 10., 100.])
